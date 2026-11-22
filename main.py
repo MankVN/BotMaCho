@@ -3,11 +3,14 @@ import os
 import random
 import aiosqlite
 import discord
-from discord import app_commands
 from discord.ext import commands
 
 DB_NAME = "bot_data.db"
 BANNER_FILE = "13490.gif"
+START_IMAGE_FILE = "images (27).jpeg"
+NIGHT_IMAGE_FILE = "Bai-tho-anh-trang-700.jpg"
+END_GIF_FILE = "minecraft-dog.gif"
+
 WIN_COIN = 150
 LOSE_COIN = 50
 
@@ -147,6 +150,26 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Duy nhất 1 phòng Ma Chó / 1 server tại 1 thời điểm
 active_guild_games: dict[int, "WerewolfGame"] = {}
+
+
+async def send_with_optional_image(
+    channel: discord.abc.Messageable,
+    embed: discord.Embed,
+    image_path: str | None,
+    content: str | None = None
+):
+    if image_path and os.path.exists(image_path):
+        filename = os.path.basename(image_path)
+        embed.set_image(url=f"attachment://{filename}")
+        file = discord.File(image_path, filename=filename)
+        try:
+            return await channel.send(content=content, embed=embed, file=file)
+        finally:
+            try:
+                file.close()
+            except Exception:
+                pass
+    return await channel.send(content=content, embed=embed)
 
 
 async def init_coin_db():
@@ -390,18 +413,17 @@ class WerewolfGame:
 
         active_guild_games.pop(self.guild_id, None)
 
-        embed = discord.Embed(title=title, color=discord.Color.green())
-        embed.add_field(name=f"🎉 Thắng (+{WIN_COIN} Coin)", value="\n".join(winners_txt) or "Không có", inline=False)
-        embed.add_field(name=f"💀 Thua (+{LOSE_COIN} Coin)", value="\n".join(losers_txt) or "Không có", inline=False)
+        lobby_embed = discord.Embed(title=title, color=discord.Color.green())
+        lobby_embed.add_field(name=f"🎉 Thắng (+{WIN_COIN} Coin)", value="\n".join(winners_txt) or "Không có", inline=False)
+        lobby_embed.add_field(name=f"💀 Thua (+{LOSE_COIN} Coin)", value="\n".join(losers_txt) or "Không có", inline=False)
 
-        if custom_message:
-            await self.lobby_channel.send(custom_message)
-        await self.lobby_channel.send(embed=embed)
+        await send_with_optional_image(self.lobby_channel, lobby_embed, END_GIF_FILE, content=custom_message)
 
         if self.game_channel:
-            if custom_message:
-                await self.game_channel.send(custom_message)
-            await self.game_channel.send(embed=embed)
+            room_embed = discord.Embed(title=title, color=discord.Color.green())
+            room_embed.add_field(name=f"🎉 Thắng (+{WIN_COIN} Coin)", value="\n".join(winners_txt) or "Không có", inline=False)
+            room_embed.add_field(name=f"💀 Thua (+{LOSE_COIN} Coin)", value="\n".join(losers_txt) or "Không có", inline=False)
+            await send_with_optional_image(self.game_channel, room_embed, END_GIF_FILE, content=custom_message)
             await self.game_channel.send("⏳ Phòng chơi riêng sẽ tự động xóa sau **15 giây**...")
             await asyncio.sleep(15)
             try:
@@ -528,7 +550,7 @@ class WerewolfGame:
                 if victim:
                     opts.append(discord.SelectOption(label=f"Cứu {victim.display_name[:65]}", value="heal", emoji="🧪"))
             if not self.witch_poison_used:
-                for p in alive:
+                for p in alive[:22]:
                     if p.id != actor.id:
                         opts.append(discord.SelectOption(label=f"Độc {p.display_name[:65]}", value=f"poison:{p.id}", emoji="☠️"))
             opts.append(discord.SelectOption(label="Không dùng bình nào", value="none", emoji="⏭️"))
@@ -647,7 +669,7 @@ class WerewolfGame:
             return []
 
         opts = [discord.SelectOption(label="Không hy sinh đêm nay", value="skip", emoji="⏭️")]
-        for rec in self.dead_records:
+        for rec in self.dead_records[:24]:
             rinfo = ALL_WEREWOLF_ROLES[rec["role"]]
             opts.append(
                 discord.SelectOption(
@@ -723,12 +745,16 @@ class WerewolfGame:
                 self.day_count += 1
                 timings = self.get_timings()
 
-                # 1. BAN ĐÊM - KHÓA CHAT
+                # 1. BAN ĐÊM - KHÓA CHAT + ẢNH MỖI ĐÊM
                 await self.set_room_chat_permission(can_chat=False)
-                await self.game_channel.send(
-                    f"🌙 **ĐÊM THỨ {self.day_count} ({timings['night']}s)** — Kênh chat đã khóa! "
-                    "Các vai trò đặc biệt vui lòng kiểm tra tin nhắn riêng (DM) từ bot..."
+                night_embed = discord.Embed(
+                    title=f"🌙 ĐÊM THỨ {self.day_count} ({timings['night']}s)",
+                    description=(
+                        "Kênh chat đã khóa! Các vai trò đặc biệt vui lòng kiểm tra tin nhắn riêng (DM) từ bot..."
+                    ),
+                    color=discord.Color.dark_blue()
                 )
+                await send_with_optional_image(self.game_channel, night_embed, NIGHT_IMAGE_FILE)
 
                 wolf_votes = []
                 protected_id = None
@@ -1016,16 +1042,20 @@ class LobbyView(discord.ui.View):
                 failed_dm.append(player.mention)
 
         mentions_all = " ".join([p.mention for p in self.game.players])
-        intro_msg = (
-            f"🐺 **VÁN MA CHÓ BẮT ĐẦU!**\n"
+        intro_desc = (
             f"{mentions_all}\n\n"
             f"📩 Bot đã nhắn tin riêng (DM) báo role cho từng người.\n"
             f"🔒 Ban đêm kênh này sẽ tự động khóa chat; ban ngày chỉ người còn sống mới được chat."
         )
         if failed_dm:
-            intro_msg += f"\n⚠️ Chưa gửi được DM cho: {', '.join(failed_dm)}."
+            intro_desc += f"\n⚠️ Chưa gửi được DM cho: {', '.join(failed_dm)}."
 
-        await room.send(intro_msg)
+        start_embed = discord.Embed(
+            title="🐺 VÁN MA CHÓ BẮT ĐẦU!",
+            description=intro_desc,
+            color=discord.Color.gold()
+        )
+        await send_with_optional_image(room, start_embed, START_IMAGE_FILE)
 
         for item in self.children:
             item.disabled = True
@@ -1059,7 +1089,7 @@ class LobbyView(discord.ui.View):
 
         embed = discord.Embed(
             title="📜 Danh Sách 13 Role Ma Chó",
-            description="\n".join(lines),
+            description="\n".join(lines)[:4000],
             color=discord.Color.blurple()
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
