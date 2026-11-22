@@ -1,0 +1,6 @@
+discord.py
+feedparser
+flask
+requests
+pillow
+aiosqlite
