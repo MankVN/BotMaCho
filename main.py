@@ -1144,7 +1144,6 @@ async def slash_macho(interaction: discord.Interaction):
 @bot.event
 async def on_ready():
     await init_coin_db()
-    await bot.tree.sync()
     print(f"✅ Bot đã sẵn sàng: {bot.user} (ID: {bot.user.id})")
 
 
